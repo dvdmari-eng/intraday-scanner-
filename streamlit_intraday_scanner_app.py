@@ -9,11 +9,6 @@ import streamlit as st
 import yfinance as yf
 
 
-# =========================================================
-# Intraday 5-minute trading dashboard - Streamlit app
-# =========================================================
-
-
 @dataclass
 class DecisionResult:
     symbol: str
@@ -203,8 +198,6 @@ def score_setup(df: pd.DataFrame, symbol: str) -> DecisionResult:
         "vol_avg20": float(latest["VOL_AVG20"]),
         "rvol": float(latest["RVOL"]),
         "close_pos": float(latest["CLOSE_POS"]),
-        "prev5_high": float(latest["PREV5_HIGH"]) if pd.notna(latest["PREV5_HIGH"]) else np.nan,
-        "prev5_low": float(latest["PREV5_LOW"]) if pd.notna(latest["PREV5_LOW"]) else np.nan,
         "last_bar_time": str(latest_ts),
     }
 
@@ -248,9 +241,6 @@ def analyze_symbol(symbol: str) -> Dict:
     enriched = add_indicators(raw)
     result = score_setup(enriched, symbol)
 
-    score_tip = score_explanation(result.score)
-    decision_tip = decision_explanation(result.decision)
-
     return {
         "Symbol": result.symbol,
         "Price": round(result.last_price, 2),
@@ -265,8 +255,6 @@ def analyze_symbol(symbol: str) -> Dict:
         "Close_vs_VWAP": round(result.snapshot["close"] - result.snapshot["vwap"], 2),
         "Last Bar": result.snapshot["last_bar_time"],
         "Reasons": " | ".join(result.reasons[:4]),
-        "Score Info": score_tip,
-        "Decision Info": decision_tip,
     }
 
 
@@ -295,8 +283,6 @@ def analyze_watchlist(symbols: List[str]) -> pd.DataFrame:
                     "Close_vs_VWAP": np.nan,
                     "Last Bar": "",
                     "Reasons": "",
-                    "Score Info": "No score available.",
-                    "Decision Info": "The app could not analyze this symbol.",
                 }
             )
 
@@ -334,7 +320,6 @@ def style_decision_table(df: pd.DataFrame):
     def color_row(row):
         color = decision_color(row["Decision"])
         return [f"background-color: {color}; color: white" if col == "Decision" else "" for col in row.index]
-
     return df.style.apply(color_row, axis=1)
 
 
@@ -468,14 +453,11 @@ if refresh:
         unsafe_allow_html=True,
     )
 
-should_run = scan_button or refresh or "scan_results" not in st.session_state
-
-if should_run:
+if scan_button or refresh or "scan_results" not in st.session_state:
     with st.spinner("Scanning watchlist..."):
-        scan_df = analyze_watchlist(symbols)
-        st.session_state["scan_results"] = scan_df
-else:
-    scan_df = st.session_state.get("scan_results", pd.DataFrame())
+        st.session_state["scan_results"] = analyze_watchlist(symbols)
+
+scan_df = st.session_state.get("scan_results", pd.DataFrame())
 
 if scan_df.empty:
     st.warning("No valid symbols to analyze yet.")
@@ -495,16 +477,6 @@ with col4:
 
 st.subheader("Watchlist Analysis")
 
-tooltip_df = display_df.copy()
-tooltip_df["Score"] = tooltip_df.apply(
-    lambda row: f"{row['Score']} ⓘ\n{row['Score Info']}" if pd.notna(row["Score"]) else "N/A",
-    axis=1,
-)
-tooltip_df["Decision"] = tooltip_df.apply(
-    lambda row: f"{row['Decision']} ⓘ\n{row['Decision Info']}",
-    axis=1,
-)
-
 visible_columns = [
     "Symbol",
     "Price",
@@ -522,10 +494,33 @@ visible_columns = [
 ]
 
 st.dataframe(
-    style_decision_table(tooltip_df[visible_columns]),
+    style_decision_table(display_df[visible_columns]),
     use_container_width=True,
     height=420,
 )
+
+st.markdown("### Score / Decision Help")
+help_col1, help_col2 = st.columns(2)
+
+with help_col1:
+    st.info(
+        "**Score**\n\n"
+        "- 6 or more: very strong bullish alignment\n"
+        "- 3 to 5: bullish setup\n"
+        "- -2 to 2: mixed / wait\n"
+        "- -3 to -5: bearish setup\n"
+        "- -6 or less: very strong bearish alignment"
+    )
+
+with help_col2:
+    st.info(
+        "**Decision**\n\n"
+        "- STRONG LONG: strongest bullish setup\n"
+        "- LONG SETUP: bullish but weaker\n"
+        "- WAIT: mixed signals\n"
+        "- SHORT SETUP: bearish but weaker\n"
+        "- STRONG SHORT: strongest bearish setup"
+    )
 
 longs = display_df[display_df["Decision"].isin(["STRONG LONG", "LONG SETUP"])]
 shorts = display_df[display_df["Decision"].isin(["STRONG SHORT", "SHORT SETUP"])]
@@ -551,22 +546,13 @@ selected_row = display_df[display_df["Symbol"] == selected_symbol].iloc[0]
 
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Price", selected_row["Price"])
-m2.metric("Score", selected_row["Score"])
-m3.metric("Decision", selected_row["Decision"])
+m2.metric("Score", selected_row["Score"], help=score_explanation(selected_row["Score"]))
+m3.metric("Decision", selected_row["Decision"], help=decision_explanation(selected_row["Decision"]))
 m4.metric("RSI14", selected_row["RSI14"])
 m5.metric("RVOL", selected_row["RVOL"])
 
 st.write("**Last bar time:**", selected_row["Last Bar"])
 st.write("**Reasons:**", selected_row["Reasons"] if selected_row["Reasons"] else "No strong signals right now.")
-
-with st.expander("How Score and Decision work"):
-    st.write("**Score** is the combined result of your trading rules: VWAP, moving averages, crossovers, volume behavior, candle structure, breakout/breakdown, and RSI.")
-    st.write("**Decision** translates that score into a trading label:")
-    st.write("- STRONG LONG: strongest bullish alignment")
-    st.write("- LONG SETUP: bullish but weaker")
-    st.write("- WAIT: mixed or unclear")
-    st.write("- SHORT SETUP: bearish but weaker")
-    st.write("- STRONG SHORT: strongest bearish alignment")
 
 try:
     raw_chart = download_data(selected_symbol, period="10d", interval="5m")
