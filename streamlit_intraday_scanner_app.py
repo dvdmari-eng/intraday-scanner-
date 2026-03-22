@@ -327,6 +327,10 @@ with st.sidebar:
     refresh_seconds = st.slider("Refresh every X seconds", min_value=30, max_value=300, value=60, step=30)
     show_only_actionable = st.checkbox("Show only actionable setups", value=False)
     scan_button = st.button("Scan now", type="primary")
+    
+min_score = st.slider("Minimum Score", 0, 10, 3)
+min_rvol = st.slider("Minimum RVOL", 0.0, 5.0, 1.0)
+top_n = st.slider("Top N Results", 3, 20, 5)
 
 symbols = [s.strip().upper() for s in watchlist_text.split(",") if s.strip()]
 
@@ -349,9 +353,23 @@ if scan_df.empty:
     st.warning("No valid symbols to scan yet.")
     st.stop()
 
-if show_only_actionable:
-    scan_df = scan_df[scan_df["Decision"].isin(["STRONG LONG", "LONG SETUP", "SHORT SETUP", "STRONG SHORT"])]
+filtered_df = scan_df.copy()
 
+# סינון לפי החלטה
+filtered_df = filtered_df[
+    filtered_df["Decision"].isin(["STRONG LONG", "LONG SETUP", "SHORT SETUP", "STRONG SHORT"])
+]
+
+# סינון לפי score
+filtered_df = filtered_df[filtered_df["Score"] >= min_score]
+
+# סינון לפי RVOL
+filtered_df = filtered_df[filtered_df["RVOL"] >= min_rvol]
+
+if filtered_df.empty:
+    st.warning("No setups found with current filters")
+    st.stop()
+    
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("Strong Long", int((scan_df["Decision"] == "STRONG LONG").sum()))
@@ -363,10 +381,10 @@ with col4:
     st.metric("Strong Short", int((scan_df["Decision"] == "STRONG SHORT").sum()))
 
 st.subheader("Watchlist Scan")
-st.dataframe(style_decision_table(scan_df), use_container_width=True)
+st.dataframe(style_decision_table(filtered_df), use_container_width=True)
 
-longs = scan_df[scan_df["Decision"].isin(["STRONG LONG", "LONG SETUP"])]
-shorts = scan_df[scan_df["Decision"].isin(["STRONG SHORT", "SHORT SETUP"])]
+longs = filtered_df[scan_df["Decision"].isin(["STRONG LONG", "LONG SETUP"])]
+shorts = filtered_df[scan_df["Decision"].isin(["STRONG SHORT", "SHORT SETUP"])]
 
 left, right = st.columns(2)
 with left:
@@ -384,7 +402,7 @@ with right:
         st.dataframe(style_decision_table(shorts.head(5)), use_container_width=True)
 
 st.subheader("Symbol Details")
-selected_symbol = st.selectbox("Choose a symbol", scan_df["Symbol"].tolist())
+selected_symbol = st.selectbox("Choose a symbol", filtered_df["Symbol"].tolist())
 selected_row = scan_df[scan_df["Symbol"] == selected_symbol].iloc[0]
 
 m1, m2, m3, m4, m5 = st.columns(5)
