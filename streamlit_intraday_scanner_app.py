@@ -3,20 +3,14 @@ from typing import Dict, Tuple, List
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
 
 
 # =========================================================
-# Intraday 5-minute trading scanner - Streamlit app
-# =========================================================
-# Features:
-# - User can enter a custom watchlist
-# - Scan button for one-time scan
-# - Auto-refresh option during market hours
-# - Summary tables for long/short setups
-# - Detailed breakdown for a selected symbol
+# Intraday 5-minute trading dashboard - Streamlit app
 # =========================================================
 
 
@@ -224,10 +218,38 @@ def score_setup(df: pd.DataFrame, symbol: str) -> DecisionResult:
     )
 
 
+def score_explanation(score: float) -> str:
+    if pd.isna(score):
+        return "No score available."
+    if score >= 6:
+        return "Very strong bullish setup based on your rules."
+    if score >= 3:
+        return "Positive setup, but not the strongest level."
+    if score <= -6:
+        return "Very strong bearish setup based on your rules."
+    if score <= -3:
+        return "Negative setup, but not the strongest level."
+    return "Mixed signals. No strong edge right now."
+
+
+def decision_explanation(decision: str) -> str:
+    explanations = {
+        "STRONG LONG": "Most signals align to the upside. Strong bullish intraday setup.",
+        "LONG SETUP": "Bullish bias exists, but confirmation is weaker than strong long.",
+        "WAIT": "Signals are mixed or weak. Better to wait for clearer structure.",
+        "SHORT SETUP": "Bearish bias exists, but confirmation is weaker than strong short.",
+        "STRONG SHORT": "Most signals align to the downside. Strong bearish intraday setup.",
+    }
+    return explanations.get(decision, "No explanation available.")
+
+
 def analyze_symbol(symbol: str) -> Dict:
     raw = download_data(symbol=symbol, period="10d", interval="5m")
     enriched = add_indicators(raw)
     result = score_setup(enriched, symbol)
+
+    score_tip = score_explanation(result.score)
+    decision_tip = decision_explanation(result.decision)
 
     return {
         "Symbol": result.symbol,
@@ -243,6 +265,8 @@ def analyze_symbol(symbol: str) -> Dict:
         "Close_vs_VWAP": round(result.snapshot["close"] - result.snapshot["vwap"], 2),
         "Last Bar": result.snapshot["last_bar_time"],
         "Reasons": " | ".join(result.reasons[:4]),
+        "Score Info": score_tip,
+        "Decision Info": decision_tip,
     }
 
 
@@ -271,6 +295,8 @@ def analyze_watchlist(symbols: List[str]) -> pd.DataFrame:
                     "Close_vs_VWAP": np.nan,
                     "Last Bar": "",
                     "Reasons": "",
+                    "Score Info": "No score available.",
+                    "Decision Info": "The app could not analyze this symbol.",
                 }
             )
 
@@ -311,8 +337,15 @@ def style_decision_table(df: pd.DataFrame):
 
     return df.style.apply(color_row, axis=1)
 
+
 def build_candlestick_chart(chart_df: pd.DataFrame, symbol: str):
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.75, 0.25],
+    )
 
     fig.add_trace(
         go.Candlestick(
@@ -322,16 +355,13 @@ def build_candlestick_chart(chart_df: pd.DataFrame, symbol: str):
             low=chart_df["Low"],
             close=chart_df["Close"],
             name="Candles",
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=chart_df.index,
-            y=chart_df["VWAP"],
-            mode="lines",
-            name="VWAP",
-        )
+            increasing_line_color="green",
+            increasing_fillcolor="green",
+            decreasing_line_color="red",
+            decreasing_fillcolor="red",
+        ),
+        row=1,
+        col=1,
     )
 
     fig.add_trace(
@@ -340,7 +370,10 @@ def build_candlestick_chart(chart_df: pd.DataFrame, symbol: str):
             y=chart_df["MA20"],
             mode="lines",
             name="MA20",
-        )
+            line=dict(color="#39ff14", width=2),
+        ),
+        row=1,
+        col=1,
     )
 
     fig.add_trace(
@@ -349,7 +382,10 @@ def build_candlestick_chart(chart_df: pd.DataFrame, symbol: str):
             y=chart_df["MA50"],
             mode="lines",
             name="MA50",
-        )
+            line=dict(color="blue", width=2),
+        ),
+        row=1,
+        col=1,
     )
 
     fig.add_trace(
@@ -358,24 +394,58 @@ def build_candlestick_chart(chart_df: pd.DataFrame, symbol: str):
             y=chart_df["MA200"],
             mode="lines",
             name="MA200",
-        )
+            line=dict(color="yellow", width=2),
+        ),
+        row=1,
+        col=1,
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["VWAP"],
+            mode="lines",
+            name="VWAP",
+            line=dict(color="red", width=2),
+        ),
+        row=1,
+        col=1,
+    )
+
+    volume_colors = [
+        "green" if close >= open_ else "red"
+        for open_, close in zip(chart_df["Open"], chart_df["Close"])
+    ]
+
+    fig.add_trace(
+        go.Bar(
+            x=chart_df.index,
+            y=chart_df["Volume"],
+            name="Volume",
+            marker_color=volume_colors,
+        ),
+        row=2,
+        col=1,
     )
 
     fig.update_layout(
         title=f"{symbol} - 5 Minute Candlestick Chart",
-        xaxis_title="Time",
-        yaxis_title="Price",
         xaxis_rangeslider_visible=False,
-        height=650,
+        height=750,
         legend_title="Indicators",
+        template="plotly_dark",
+        margin=dict(l=20, r=20, t=50, b=20),
     )
+
+    fig.update_yaxes(title_text="Price", row=1, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
 
     return fig
 
 
-st.set_page_config(page_title="Intraday 5M Trading Scanner", layout="wide")
+st.set_page_config(page_title="Intraday 5M Trading Dashboard", layout="wide")
 
-st.title("Intraday 5-Minute Trading Scanner")
+st.title("Intraday 5-Minute Trading Dashboard")
 st.caption("VWAP + MA20/50/200 + RSI + RVOL + 5-bar breakout/breakdown")
 
 with st.sidebar:
@@ -387,12 +457,8 @@ with st.sidebar:
     )
     refresh = st.checkbox("Auto refresh", value=False)
     refresh_seconds = st.slider("Refresh every X seconds", min_value=30, max_value=300, value=60, step=30)
-    show_only_actionable = st.checkbox("Show only actionable setups", value=False)
+    top_n = st.slider("Top N Results", 3, 20, 5)
     scan_button = st.button("Scan now", type="primary")
-    
-min_score = st.slider("Minimum Score", 0, 10, 3)
-min_rvol = st.slider("Minimum RVOL", 0.0, 5.0, 1.0)
-top_n = st.slider("Top N Results", 3, 20, 5)
 
 symbols = [s.strip().upper() for s in watchlist_text.split(",") if s.strip()]
 
@@ -412,41 +478,57 @@ else:
     scan_df = st.session_state.get("scan_results", pd.DataFrame())
 
 if scan_df.empty:
-    st.warning("No valid symbols to scan yet.")
+    st.warning("No valid symbols to analyze yet.")
     st.stop()
 
-filtered_df = scan_df.copy()
+display_df = scan_df.copy()
 
-# סינון לפי החלטה
-filtered_df = filtered_df[
-    filtered_df["Decision"].isin(["STRONG LONG", "LONG SETUP", "SHORT SETUP", "STRONG SHORT"])
-]
-
-# סינון לפי score
-filtered_df = filtered_df[filtered_df["Score"] >= min_score]
-
-# סינון לפי RVOL
-filtered_df = filtered_df[filtered_df["RVOL"] >= min_rvol]
-
-if filtered_df.empty:
-    st.warning("No setups found with current filters")
-    st.stop()
-    
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.metric("Strong Long", int((scan_df["Decision"] == "STRONG LONG").sum()))
+    st.metric("Strong Long", int((display_df["Decision"] == "STRONG LONG").sum()))
 with col2:
-    st.metric("Long Setup", int((scan_df["Decision"] == "LONG SETUP").sum()))
+    st.metric("Long Setup", int((display_df["Decision"] == "LONG SETUP").sum()))
 with col3:
-    st.metric("Short Setup", int((scan_df["Decision"] == "SHORT SETUP").sum()))
+    st.metric("Short Setup", int((display_df["Decision"] == "SHORT SETUP").sum()))
 with col4:
-    st.metric("Strong Short", int((scan_df["Decision"] == "STRONG SHORT").sum()))
+    st.metric("Strong Short", int((display_df["Decision"] == "STRONG SHORT").sum()))
 
-st.subheader("Watchlist Scan")
-st.dataframe(style_decision_table(filtered_df), use_container_width=True)
+st.subheader("Watchlist Analysis")
 
-longs = filtered_df[scan_df["Decision"].isin(["STRONG LONG", "LONG SETUP"])]
-shorts = filtered_df[scan_df["Decision"].isin(["STRONG SHORT", "SHORT SETUP"])]
+tooltip_df = display_df.copy()
+tooltip_df["Score"] = tooltip_df.apply(
+    lambda row: f"{row['Score']} ⓘ\n{row['Score Info']}" if pd.notna(row["Score"]) else "N/A",
+    axis=1,
+)
+tooltip_df["Decision"] = tooltip_df.apply(
+    lambda row: f"{row['Decision']} ⓘ\n{row['Decision Info']}",
+    axis=1,
+)
+
+visible_columns = [
+    "Symbol",
+    "Price",
+    "Score",
+    "Decision",
+    "VWAP",
+    "MA20",
+    "MA50",
+    "MA200",
+    "RSI14",
+    "RVOL",
+    "Close_vs_VWAP",
+    "Last Bar",
+    "Reasons",
+]
+
+st.dataframe(
+    style_decision_table(tooltip_df[visible_columns]),
+    use_container_width=True,
+    height=420,
+)
+
+longs = display_df[display_df["Decision"].isin(["STRONG LONG", "LONG SETUP"])]
+shorts = display_df[display_df["Decision"].isin(["STRONG SHORT", "SHORT SETUP"])]
 
 left, right = st.columns(2)
 with left:
@@ -454,18 +536,18 @@ with left:
     if longs.empty:
         st.info("No long candidates right now.")
     else:
-        st.dataframe(style_decision_table(longs.head(5)), use_container_width=True)
+        st.dataframe(style_decision_table(longs.head(top_n)), use_container_width=True)
 
 with right:
     st.subheader("Top Short Candidates")
     if shorts.empty:
         st.info("No short candidates right now.")
     else:
-        st.dataframe(style_decision_table(shorts.head(5)), use_container_width=True)
+        st.dataframe(style_decision_table(shorts.head(top_n)), use_container_width=True)
 
 st.subheader("Symbol Details")
-selected_symbol = st.selectbox("Choose a symbol", filtered_df["Symbol"].tolist())
-selected_row = scan_df[scan_df["Symbol"] == selected_symbol].iloc[0]
+selected_symbol = st.selectbox("Choose a symbol", display_df["Symbol"].tolist())
+selected_row = display_df[display_df["Symbol"] == selected_symbol].iloc[0]
 
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("Price", selected_row["Price"])
@@ -476,6 +558,15 @@ m5.metric("RVOL", selected_row["RVOL"])
 
 st.write("**Last bar time:**", selected_row["Last Bar"])
 st.write("**Reasons:**", selected_row["Reasons"] if selected_row["Reasons"] else "No strong signals right now.")
+
+with st.expander("How Score and Decision work"):
+    st.write("**Score** is the combined result of your trading rules: VWAP, moving averages, crossovers, volume behavior, candle structure, breakout/breakdown, and RSI.")
+    st.write("**Decision** translates that score into a trading label:")
+    st.write("- STRONG LONG: strongest bullish alignment")
+    st.write("- LONG SETUP: bullish but weaker")
+    st.write("- WAIT: mixed or unclear")
+    st.write("- SHORT SETUP: bearish but weaker")
+    st.write("- STRONG SHORT: strongest bearish alignment")
 
 try:
     raw_chart = download_data(selected_symbol, period="10d", interval="5m")
