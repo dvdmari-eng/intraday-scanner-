@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
+
 import yfinance as yf
 
 
@@ -234,16 +235,20 @@ def decision_explanation(decision: str) -> str:
         "STRONG SHORT": "Most signals align to the downside. Strong bearish intraday setup.",
     }
     return explanations.get(decision, "No explanation available.")
-
+    
 
 def analyze_symbol(symbol: str) -> Dict:
     raw = download_data(symbol=symbol, period="10d", interval="5m")
     enriched = add_indicators(raw)
+
     result = score_setup(enriched, symbol)
+
+    # 🔥 זה הדבר החשוב
+    latest_price = float(enriched["Close"].iloc[-1])
 
     return {
         "Symbol": result.symbol,
-        "Price": round(result.last_price, 2),
+        "Price": round(latest_price, 2),  # ← מחיר אמיתי מהנר האחרון
         "Score": result.score,
         "Decision": result.decision,
         "VWAP": round(result.snapshot["vwap"], 2),
@@ -256,7 +261,7 @@ def analyze_symbol(symbol: str) -> Dict:
         "Last Bar": result.snapshot["last_bar_time"],
         "Reasons": " | ".join(result.reasons[:4]),
     }
-
+    
 
 def analyze_watchlist(symbols: List[str]) -> pd.DataFrame:
     rows = []
