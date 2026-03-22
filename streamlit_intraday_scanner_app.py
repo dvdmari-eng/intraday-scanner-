@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+import plotly.graph_objects as go
 
 
 # =========================================================
@@ -310,6 +311,67 @@ def style_decision_table(df: pd.DataFrame):
 
     return df.style.apply(color_row, axis=1)
 
+def build_candlestick_chart(chart_df: pd.DataFrame, symbol: str):
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Candlestick(
+            x=chart_df.index,
+            open=chart_df["Open"],
+            high=chart_df["High"],
+            low=chart_df["Low"],
+            close=chart_df["Close"],
+            name="Candles",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["VWAP"],
+            mode="lines",
+            name="VWAP",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["MA20"],
+            mode="lines",
+            name="MA20",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["MA50"],
+            mode="lines",
+            name="MA50",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["MA200"],
+            mode="lines",
+            name="MA200",
+        )
+    )
+
+    fig.update_layout(
+        title=f"{symbol} - 5 Minute Candlestick Chart",
+        xaxis_title="Time",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False,
+        height=650,
+        legend_title="Indicators",
+    )
+
+    return fig
+
 
 st.set_page_config(page_title="Intraday 5M Trading Scanner", layout="wide")
 
@@ -418,7 +480,10 @@ st.write("**Reasons:**", selected_row["Reasons"] if selected_row["Reasons"] else
 try:
     raw_chart = download_data(selected_symbol, period="10d", interval="5m")
     chart_df = add_indicators(raw_chart).copy()
-    chart_df = chart_df[["Close", "VWAP", "MA20", "MA50", "MA200"]].dropna()
-    st.line_chart(chart_df, use_container_width=True)
+    chart_df = chart_df.dropna(subset=["VWAP", "MA20", "MA50", "MA200"])
+
+    fig = build_candlestick_chart(chart_df, selected_symbol)
+    st.plotly_chart(fig, use_container_width=True)
+
 except Exception as e:
     st.warning(f"Could not load chart for {selected_symbol}: {e}")
